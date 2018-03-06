@@ -12,6 +12,8 @@ my $usage = "\n\n\tusage: $0 left.fq finspector.fusion_predictions.final.abridge
 my $fq_filename = $ARGV[0] or die $usage;
 my $finspector_results = $ARGV[1] or die $usage;
 
+## Require at least 100k reads before computing any FFPM value.
+
 main: {
 
     my $num_frags = &get_num_total_frags($fq_filename);
@@ -25,15 +27,20 @@ main: {
     my $tab_writer = new DelimParser::Writer(*STDOUT, "\t", \@column_headers);
     
     while (my $row = $tab_reader->get_row()) {
-        
-        my $J = $row->{JunctionReadCount};
-        my $S = $row->{SpanningFragCount};
-        
-        my $J_FFPM = &compute_FFPM($J, $num_frags);
-        my $S_FFPM = &compute_FFPM($S, $num_frags);
 
-        $row->{FFPM} = $J_FFPM + $S_FFPM;
-        
+        if ($num_frags >= 100000) {
+            
+            my $J = $row->{JunctionReadCount};
+            my $S = $row->{SpanningFragCount};
+            
+            my $J_FFPM = &compute_FFPM($J, $num_frags);
+            my $S_FFPM = &compute_FFPM($S, $num_frags);
+            
+            $row->{FFPM} = $J_FFPM + $S_FFPM;
+        }
+        else {
+            $row->{FFPM} = "NA";
+        }
         $tab_writer->write_row($row);
     }
     close $fh;
@@ -44,28 +51,32 @@ main: {
 
 ####
 sub get_num_total_frags {
-    my ($fq_file_listing) = @_;
+    my ($fq_file) = @_;
 
-    my @fq_files = split(',', $fq_file_listing);
+    my $num_lines;
+	if ($fq_file =~/,/){
+		$fq_file =~ s/,/ /g;
+		if ($fq_file =~ /\.gz/) {
+			$num_lines = `cat $fq_file|gunzip -c | wc -l`;
+		}
+		else {
+			$num_lines = `cat $fq_file | wc -l`;
+		}
+	}else{
+		if ($fq_file =~ /\.gz/) {
+			$num_lines = `gunzip -c $fq_file | wc -l`;
+		}
+		else {
+			$num_lines = `cat $fq_file | wc -l`;
+		}
+	}
+
+    chomp $num_lines;
     
-    my $sum_lines = 0;
-    foreach my $fq_file (@fq_files) {
-        
-        my $num_lines;
-        if ($fq_file =~ /\.gz/) {
-            $num_lines = `gunzip -c $fq_file | wc -l`;
-        }
-        else {
-            $num_lines = `cat $fq_file | wc -l`;
-        }
-        chomp $num_lines;
-        $num_lines =~ /^\s*(\d+)/ or die "Error, cannot extract line count from [$num_lines]";
-        $num_lines = $1;
+    $num_lines =~ /^\s*(\d+)/ or die "Error, cannot extract line count from [$num_lines]";
+    $num_lines = $1;
 
-        $sum_lines += $num_lines;
-    }
-
-    my $num_seq_records = $sum_lines / 4;
+    my $num_seq_records = $num_lines / 4;
 
     return($num_seq_records);
 }
